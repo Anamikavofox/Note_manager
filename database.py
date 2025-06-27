@@ -10,8 +10,7 @@ SessionLocal=sessionmaker(bind=engine,autocommit=False,autoflush=False)
 Base=declarative_base()
 
 class NoteModel(Base):
-    __tablename__="notes"
-
-    id=Column(Integer,primary_key=True,index=True)
-    title=Column(String,nullable=False)
-    content=Column(String,nullable=False)
+    __tablename__ = "notes"
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    content = Column(String, nullable=False)

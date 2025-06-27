@@ -1,11 +1,13 @@
 from fastapi import FastAPI,HTTPException,Depends,status
-from fastapi.security import HTTPBasic,HTTPBasicCredentials
+from fastapi.security import OAuth2AuthorizationCodeBearer,OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from pydantic import BaseModel
 import secrets
-from typing import Optional
+from typing import Optional,List
 from database import Base,engine,SessionLocal,NoteModel
+from jose import JWTError,jwt
+
 
 Base.metadata.create_all(bind=engine)
 
@@ -31,16 +33,6 @@ def get_db():
     finally:
         db.close()
 
-class Note(BaseModel):
-    title:str
-    content:str
-
-class NoteOut(Note):
-    id: int
-
-    class Config:
-        orm_mode=True
-
 
 @app.post("/notes/",response_model=NoteOut,status_code=201)
 def create_note(note:Note,db:Session=Depends(get_db), username:str=Depends(authenticate)):
@@ -64,9 +56,9 @@ def get_note(note_id:int,db: Session = Depends(get_db),username:str=Depends(auth
     return note
 
 
-@app.put("/notes/{note_id}",response_model=NoteOut)
-def update_note(note_id:Optional[int],
-                title:Optional[str],
+@app.put("/notes/update",response_model=List[NoteOut])
+def update_note(note_id:Optional[int]=None,
+                title:Optional[str]=None,
                 updated_note:Note,
                 db: Session = Depends(get_db),
                 username:str=Depends(authenticate)):
@@ -80,15 +72,16 @@ def update_note(note_id:Optional[int],
     if title is not None:
         filters.append(NoteModel.title == title)
 
-    note=db.query(NoteModel).filter(or_(*filter)).all()
+    note=db.query(NoteModel).filter(or_(*filters)).all()
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
     
-    for note in notes:
-        note.title=updated_note.title
-        note.content=updated_note.content
+    for n in notes:
+        n.title=updated_note.title
+        n.content=updated_note.content
     db.commit()
-    db.refresh(note)
+    for n in notes:
+        db.refresh(n)
     return note
 
 
