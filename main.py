@@ -1,9 +1,11 @@
 from fastapi import FastAPI,HTTPException,Depends,status
 from fastapi.security import HTTPBasic,HTTPBasicCredentials
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from pydantic import BaseModel
 import secrets
-from .database import Base,engine,SessionLocal,NoteModel
+from typing import Optional
+from database import Base,engine,SessionLocal,NoteModel
 
 Base.metadata.create_all(bind=engine)
 
@@ -63,26 +65,32 @@ def get_note(note_id:int,db: Session = Depends(get_db),username:str=Depends(auth
 
 
 @app.put("/notes/{note_id}",response_model=NoteOut)
-def update_note(note_id:int,updated_note:Note,db: Session = Depends(get_db),username:str=Depends(authenticate)):
-    note=db.query(NoteModel).filter(NoteModel.id==note_id).first()
+def update_note(note_id:Optional[int],
+                title:Optional[str],
+                updated_note:Note,
+                db: Session = Depends(get_db),
+                username:str=Depends(authenticate)):
+    
+    if note_id is None and title is None:
+        raise HTTPException(status_code=400,detail="Provide note_id or title to locate the note")
+    
+    filters = []
+    if note_id is not None:
+        filters.append(NoteModel.id == note_id)
+    if title is not None:
+        filters.append(NoteModel.title == title)
+
+    note=db.query(NoteModel).filter(or_(*filter)).all()
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
-    note.title=updated_note.title
-    note.content=updated_note.content
+    
+    for note in notes:
+        note.title=updated_note.title
+        note.content=updated_note.content
     db.commit()
     db.refresh(note)
     return note
 
-
-#@app.delete("/notes/{note_id}",status_code=204)
-#def delete_note(note_id:int, db: Session = Depends(get_db),username:str=Depends(authenticate)):
-    note=db.query(NoteModel).filter(NoteModel.id==note_id).first()
-    if not note:
-        raise HTTPException(status_code=404, detail="Note not found")    
-    db.delete(note)
-    db.commit()
-    return
-from sqlalchemy import or_
 
 @app.delete("/notes/delete", status_code=204)
 def delete_note_by_any_field(
