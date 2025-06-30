@@ -1,10 +1,15 @@
 from passlib.context import CryptContext
 from jose import jwt
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
+import os
 
-SECRET_KEY = "change_this_to_long_random_string"
-ALGORITHM  = "HS256"
-ACCESS_TOKEN_EXPIRE_MIN = 30
+load_dotenv()  
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = os.getenv("ALGORITHM")
+ACCESS_TOKEN_EXPIRE_MIN = int(os.getenv("ACCESS_TOKEN_EXPIRE_MIN"))
+
 
 pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
