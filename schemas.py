@@ -19,5 +19,9 @@ class Note(BaseModel):
 class NoteOut(Note):
     id: int
 
-    class Config:
-        orm_mode = True
+class VerificationInput(BaseModel):
+    username: str
+    code: str    
+
+class Config:
+    orm_mode = True
