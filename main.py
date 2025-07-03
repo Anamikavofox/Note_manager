@@ -1,12 +1,12 @@
 from fastapi import FastAPI,HTTPException,Depends,Form
 from fastapi.security import HTTPBearer,HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-#from sqlalchemy import or_
-from typing import List
+from sqlalchemy import text
+from typing import List,Optional
 from jose import JWTError,jwt
 
-from models   import UserModel
-from database import Base,engine,SessionLocal,NoteModel
+from tasks import notify_note_created 
+from database import SessionLocal
 from auth import hash_pw, verify_pw, create_token, SECRET_KEY, ALGORITHM
 from schemas import Note, NoteOut, UserIn, Token
 
@@ -20,7 +20,6 @@ class LoginForm:
         self.username = username
         self.password = password
 
-Base.metadata.create_all(bind=engine)
 
 app= FastAPI()
 bearer_scheme=HTTPBearer()
@@ -28,7 +27,7 @@ bearer_scheme=HTTPBearer()
 
 def get_db():
     db=SessionLocal()
-    try:
+    try:    
         yield db
     finally:
         db.close()
@@ -41,8 +40,9 @@ def get_current_user(credentials:HTTPAuthorizationCredentials=Depends(bearer_sch
         username=payload.get("sub")
     except JWTError:
         raise HTTPException(status_code=401,detail="invalid token")
-    user=db.query(UserModel).filter(UserModel.username==username).first()
-
+    #user=db.query(UserModel).filter(UserModel.username==username).first()
+    user_sql=text("select * from users where username=:username")
+    user=db.execute(user_sql,{"username":username}).fetchone()
     if not user:
         raise HTTPException(status_code=401,detail="User not found")
     return user
@@ -53,17 +53,23 @@ def get_current_user(credentials:HTTPAuthorizationCredentials=Depends(bearer_sch
 
 @app.post("/register",status_code=201)
 def register(user:UserIn,db:Session=Depends(get_db)):
-    if db.query(UserModel).filter(UserModel.username==user.username).first():
+    check_user_sql=text("SELECT * FROM users WHERE username = :username")
+    existing_user=db.execute(check_user_sql,{"username":user.username}).fetchone()
+    if existing_user:
         raise HTTPException(400,"username already exists")
-    db_user=UserModel(username=user.username,password=hash_pw(user.password))
-    db.add(db_user)
+    
+    insert_Sql=text("""INSERT INTO users (username, password)
+        VALUES (:username, :password)
+        RETURNING id, username""")
+    result=db.execute(insert_Sql,{"username":user.username,"password":hash_pw})
     db.commit()
-    db.refresh(db_user)
-    return{"id":db_user.id,"username":db_user.username}
+    user_row=result.fetchone()
+    return{"id":user_row.id,"username":user_row.username}
 
 @app.post("/login",response_model=Token)
 def login(form:LoginForm=Depends(),db:Session=Depends(get_db)):
-    user=db.query(UserModel).filter(UserModel.username==form.username).first()
+    sql=text("select * from users WHERE username = :username")
+    user = db.execute(sql, {"username": form.username}).fetchone()
     if not user or not verify_pw(form.password,user.password):
         raise HTTPException(401,"Invalid credentials")
     
@@ -72,45 +78,72 @@ def login(form:LoginForm=Depends(),db:Session=Depends(get_db)):
 
 
 @app.post("/notes/",response_model=NoteOut,status_code=201)
-def create_note(note:Note,db:Session=Depends(get_db), user:UserModel=Depends(get_current_user)):
-    db_note=NoteModel(title=note.title,content=note.content,user_id=user.id)
-    db.add(db_note)
+def create_note(note:Note,db:Session=Depends(get_db), user=Depends(get_current_user)):
+    sql = text("""
+        insert into notes (title, content, user_id)
+        values (:title, :content, :user_id)
+        returning *
+               """)
+    result = db.execute(sql, {"title": note.title, "content": note.content, "user_id": user.id})
     db.commit()
-    db.refresh(db_note)
-    return db_note
+    row=result.fetchone()
+
+    notify_note_created.delay(user.username,note.title)
+
+    return NoteOut(**dict(row._mapping))
 
 
 @app.get("/notes/",response_model=list[NoteOut])
 def get_notes(db: Session = Depends(get_db),user=Depends(get_current_user)):
-    return db.query(NoteModel).filter(NoteModel.user_id==user.id).all()
-
+    sql=text("select * from notes where user_id=:user_id")
+    rows=db.execute(sql,{"user_id":user.id}).fetchall()
+    return [NoteOut(**dict(row._mapping)) for row in rows]
+    
 
 @app.get("/notes/{note_id}",response_model=NoteOut)
 def get_note(note_id:int,db: Session = Depends(get_db),user=Depends(get_current_user)):
-    note = db.query(NoteModel).filter(NoteModel.id == note_id,NoteModel.user_id==user.id).first()
-    if not note:
+    sql=text("select * from notes where id=:id and user_id=:user_id")
+    row=db.execute(sql,{"id":note_id,"user_id":user.id}).fetchone()
+    if not row:
         raise HTTPException(status_code=404, detail="Note not found")
-    return note
+    return NoteOut(**dict(row._mapping))
 
 
 @app.put("/notes/update",response_model=List[NoteOut])
-def update_note(updated_note:Note,
-                note_id:int,
-                title:str,
+async def update_note(updated_note:Note,
+                note_id:Optional[int]=None,
+                title:Optional[str]=None,
                 db: Session = Depends(get_db),
-                user:UserModel=Depends(get_current_user)):
+                user=Depends(get_current_user)):
     
+    if note_id is None and title is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide at least note_id or title to update a note.",
+        )
+    
+    exists_sql=text("""select 1 from notes where user_id=:user_id and 
+                   (:id is null or id=:id) and 
+                   (:title is null or title=:title) 
+                   LIMIT 1""")
 
-    note=(db.query(NoteModel).filter(NoteModel.title==title and NoteModel.user_id==user.id).first())  
-    if not note:
+    if not db.execute(exists_sql,{"title":title,"user_id":user.id,"id":note_id}).fetchone():
         raise HTTPException(status_code=404, detail="Note not found")
     
-    #for n in note:
-    note.title=updated_note.title
-    note.content=updated_note.content
+    update_sql=text("""update notes
+                    set title=:new_title,content=:new_content where
+                    user_id = :user_id
+                    AND (:id is NULL or id = :id)
+                    AND (:title is NULL or title = :title)
+                    returning * """)
+    rows=db.execute(update_sql,{"new_title": updated_note.title,
+                                "new_content": updated_note.content,
+                                "id": note_id,
+                                "title": title,
+                                "user_id": user.id,
+                                 }).fetchall()
     db.commit()
-    db.refresh(note)
-    return [note]
+    return [NoteOut(**dict(row._mapping))for row in rows]
 
 
 @app.delete("/notes/delete", status_code=204)
@@ -118,21 +151,13 @@ def delete_note(
     note_id: int = None,
     title: str = None,
     db: Session = Depends(get_db),
-    user: UserModel= Depends(get_current_user)
+    user= Depends(get_current_user)
 ):
     if note_id is None and title is None:
         raise HTTPException(status_code=400, detail="At least one field (id, title, or content) must be provided.")
-
-    #filters = [NoteModel.user_id==user.id]
-    #if note_id is not None:
-    #   filters.append(NoteModel.id== note_id)
-    #if title is not None:
-    #    filters.append(NoteModel.title== title)
-
-    deleted = db.query(NoteModel).filter(NoteModel.title==title,NoteModel.id==note_id).delete()
-
-    if deleted == 0:
-        raise HTTPException(status_code=404, detail="No matching note found")
-
+    sql=text("delete from notes where user_id=:user_id and (:id is null or id=:id) and (:title is null or title=:title)")
+    result=db.execute(sql,{"user_id":user.id,"id":note_id,"title":title})
     db.commit()
+    if result.rowcount==0:
+        raise HTTPException(status_code=404,detail="no matching note found")
     return
