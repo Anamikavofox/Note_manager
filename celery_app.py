@@ -1,18 +1,19 @@
 from celery import Celery
+from celery.schedules import crontab
+from dotenv import load_dotenv
+import os
 
-REDIS_URL="redis://localhost:6379/0"
+load_dotenv()
+REDIS_URL=os.getenv("REDIS_URL")
+
+celery_app=Celery("weather_tasks",
+                  broker=REDIS_URL,include=["tasks"])
 
 
-celery_app=Celery("Notes_worker",
-                  broker=REDIS_URL,
-                  backend=REDIS_URL)
+celery_app.conf.timezone='Asia/Kolkata'
 
-
-celery_app.conf.update(task_serializer="json",
-                       result_serializer="json",
-                       accept_content=["json"],
-                       task_track_started=True,
-                       task_time_limit=30)
-
-celery_app.conf.imports = ["tasks"]
+celery_app.conf.beat_schedule={"Fetch-weather-every-5-minutes":
+                               {"task":"tasks.fetch_vofox_weather",
+                                                                "schedule":crontab(minute="*/5"),
+                                                                "args":("Vofox", 9.9312, 76.2673)}}
 

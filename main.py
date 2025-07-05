@@ -4,11 +4,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import List,Optional
 from jose import JWTError,jwt
+from datetime import datetime,timedelta
 
-from tasks import notify_note_created 
 from database import SessionLocal
 from auth import hash_pw, verify_pw, create_token, SECRET_KEY, ALGORITHM
-from schemas import Note, NoteOut, UserIn, Token
+from schemas import Note, NoteOut, UserIn, Token,WeatherResponse
 
 
 class LoginForm:
@@ -31,6 +31,20 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+@app.get("/weather/last-hour",response_model=List[WeatherResponse])
+def get_weather(db:Session=Depends(get_db)):
+    cutoff=datetime.utcnow()-timedelta(hours=1)
+    records= text("""
+        SELECT
+            place,lat,lon,temperature,weather,description,timestamp
+        FROM weather
+        where timestamp>=:cutoff
+        ORDER BY timestamp DESC
+    """)
+    rows=db.execute(records,{"cutoff":cutoff}).fetchall()
+    return[WeatherResponse(**dict(row._mapping))for row in rows]
 
 
 def get_current_user(credentials:HTTPAuthorizationCredentials=Depends(bearer_scheme),db:Session=Depends(get_db)):
@@ -61,7 +75,7 @@ def register(user:UserIn,db:Session=Depends(get_db)):
     insert_Sql=text("""INSERT INTO users (username, password)
         VALUES (:username, :password)
         RETURNING id, username""")
-    result=db.execute(insert_Sql,{"username":user.username,"password":hash_pw})
+    result=db.execute(insert_Sql,{"username":user.username,"password":hash_pw(user.password)})
     db.commit()
     user_row=result.fetchone()
     return{"id":user_row.id,"username":user_row.username}
@@ -87,9 +101,6 @@ def create_note(note:Note,db:Session=Depends(get_db), user=Depends(get_current_u
     result = db.execute(sql, {"title": note.title, "content": note.content, "user_id": user.id})
     db.commit()
     row=result.fetchone()
-
-    notify_note_created.delay(user.username,note.title)
-
     return NoteOut(**dict(row._mapping))
 
 
