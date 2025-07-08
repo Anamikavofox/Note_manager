@@ -1,97 +1,24 @@
-from fastapi import FastAPI,HTTPException,Depends,Form
-from fastapi.security import HTTPBearer,HTTPAuthorizationCredentials
+from fastapi import HTTPException,Depends,APIRouter
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import List,Optional
-from jose import JWTError,jwt
-from datetime import datetime,timedelta
 
-from database import SessionLocal
-from auth import hash_pw, verify_pw, create_token, SECRET_KEY, ALGORITHM
-from schemas import Note, NoteOut, UserIn, Token,WeatherResponse
+from app.database import SessionLocal
+from app.schemas import Note, NoteOut
+from app.routers.user import get_current_user
 
 
-class LoginForm:
-    def __init__(
-        self,
-        username: str = Form(...),
-        password: str = Form(...),):
-
-        self.username = username
-        self.password = password
-
-
-app= FastAPI()
-bearer_scheme=HTTPBearer()
-
+router = APIRouter(prefix="/notes", tags=["notes"])
 
 def get_db():
-    db=SessionLocal()
-    try:    
+    db = SessionLocal()
+    try:
         yield db
     finally:
         db.close()
 
 
-@app.get("/weather/last-hour",response_model=List[WeatherResponse])
-def get_weather(db:Session=Depends(get_db)):
-    cutoff=datetime.utcnow()-timedelta(hours=1)
-    records= text("""
-        SELECT
-            place,lat,lon,temperature,weather,description,timestamp
-        FROM weather
-        where timestamp>=:cutoff
-        ORDER BY timestamp DESC
-    """)
-    rows=db.execute(records,{"cutoff":cutoff}).fetchall()
-    return[WeatherResponse(**dict(row._mapping))for row in rows]
-
-
-def get_current_user(credentials:HTTPAuthorizationCredentials=Depends(bearer_scheme),db:Session=Depends(get_db)):
-    token=credentials.credentials
-    try:
-        payload=jwt.decode(token,SECRET_KEY,algorithms=[ALGORITHM])
-        username=payload.get("sub")
-    except JWTError:
-        raise HTTPException(status_code=401,detail="invalid token")
-    #user=db.query(UserModel).filter(UserModel.username==username).first()
-    user_sql=text("select * from users where username=:username")
-    user=db.execute(user_sql,{"username":username}).fetchone()
-    if not user:
-        raise HTTPException(status_code=401,detail="User not found")
-    return user
-
-#@app.get("/",tags=["root"])
-#def read_root()-> dict:
-#    return {"message":"welcome to the Notes Manager"}
-
-@app.post("/register",status_code=201)
-def register(user:UserIn,db:Session=Depends(get_db)):
-    check_user_sql=text("SELECT * FROM users WHERE username = :username")
-    existing_user=db.execute(check_user_sql,{"username":user.username}).fetchone()
-    if existing_user:
-        raise HTTPException(400,"username already exists")
-    
-    insert_Sql=text("""INSERT INTO users (username, password)
-        VALUES (:username, :password)
-        RETURNING id, username""")
-    result=db.execute(insert_Sql,{"username":user.username,"password":hash_pw(user.password)})
-    db.commit()
-    user_row=result.fetchone()
-    return{"id":user_row.id,"username":user_row.username}
-
-@app.post("/login",response_model=Token)
-def login(form:LoginForm=Depends(),db:Session=Depends(get_db)):
-    sql=text("select * from users WHERE username = :username")
-    user = db.execute(sql, {"username": form.username}).fetchone()
-    if not user or not verify_pw(form.password,user.password):
-        raise HTTPException(401,"Invalid credentials")
-    
-    token=create_token(user.username)
-    return {"access_token":token,"token_type":"bearer"}
-
-
-@app.post("/notes/",response_model=NoteOut,status_code=201)
+@router.post("/notes/",response_model=NoteOut,status_code=201)
 def create_note(note:Note,db:Session=Depends(get_db), user=Depends(get_current_user)):
     sql = text("""
         insert into notes (title, content, user_id)
@@ -104,14 +31,14 @@ def create_note(note:Note,db:Session=Depends(get_db), user=Depends(get_current_u
     return NoteOut(**dict(row._mapping))
 
 
-@app.get("/notes/",response_model=list[NoteOut])
+@router.get("/notes/",response_model=list[NoteOut])
 def get_notes(db: Session = Depends(get_db),user=Depends(get_current_user)):
     sql=text("select * from notes where user_id=:user_id")
     rows=db.execute(sql,{"user_id":user.id}).fetchall()
     return [NoteOut(**dict(row._mapping)) for row in rows]
     
 
-@app.get("/notes/{note_id}",response_model=NoteOut)
+@router.get("/notes/{note_id}",response_model=NoteOut)
 def get_note(note_id:int,db: Session = Depends(get_db),user=Depends(get_current_user)):
     sql=text("select * from notes where id=:id and user_id=:user_id")
     row=db.execute(sql,{"id":note_id,"user_id":user.id}).fetchone()
@@ -120,7 +47,7 @@ def get_note(note_id:int,db: Session = Depends(get_db),user=Depends(get_current_
     return NoteOut(**dict(row._mapping))
 
 
-@app.put("/notes/update",response_model=List[NoteOut])
+@router.put("/notes/update",response_model=List[NoteOut])
 async def update_note(updated_note:Note,
                 note_id:Optional[int]=None,
                 title:Optional[str]=None,
@@ -157,7 +84,7 @@ async def update_note(updated_note:Note,
     return [NoteOut(**dict(row._mapping))for row in rows]
 
 
-@app.delete("/notes/delete", status_code=204)
+@router.delete("/notes/delete", status_code=204)
 def delete_note(
     note_id: int = None,
     title: str = None,
