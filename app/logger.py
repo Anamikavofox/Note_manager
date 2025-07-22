@@ -18,6 +18,7 @@ import logging
 import logging.config
 
 logging_config={
+    "version":1,
     "disable_existing_loggers": False,
     "formatters": {
         "detailed": {
@@ -25,9 +26,6 @@ logging_config={
         },
         "simple": {
             "format": "%(levelname)s: %(message)s"
-        },
-        "simple":{
-            "format":"%(levelname)s: %(message)s"
         }
     },
     "handlers": {
@@ -47,11 +45,13 @@ logging_config={
         "handlers": ["stdout", "stderr"],
         "level": "DEBUG",},
     "loggers":{
-        "app":{"handlers": ["stdout", "stderr"],
+        "app":{
+            "handlers": ["stdout", "stderr"],
             "level": "INFO",
             "propagate": False,
-    },},}
-
+    },
+    },
+    }
 def setup_logging():
     logging.config.dictConfig(logging_config)
 

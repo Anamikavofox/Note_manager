@@ -7,6 +7,7 @@ from jose import JWTError,jwt
 from app.database import SessionLocal
 from app.auth import hash_pw, verify_pw, create_token,SECRET_KEY, ALGORITHM
 from app.schemas import UserIn, Token
+from app.logger import setup_logging,logger
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -47,6 +48,7 @@ def get_current_user(credentials:HTTPAuthorizationCredentials=Depends(bearer_sch
 
 @router.post("/register",status_code=201)
 def register(user:UserIn,db:Session=Depends(get_db)):
+    logger.info("Registration done")
     check_user_sql=text("SELECT * FROM users WHERE username = :username")
     existing_user=db.execute(check_user_sql,{"username":user.username}).fetchone()
     if existing_user:
@@ -62,6 +64,7 @@ def register(user:UserIn,db:Session=Depends(get_db)):
 
 @router.post("/login",response_model=Token)
 def login(form:LoginForm=Depends(),db:Session=Depends(get_db)):
+    logger.info("Login done")
     sql=text("select * from users WHERE username = :username")
     user = db.execute(sql, {"username": form.username}).fetchone()
     if not user or not verify_pw(form.password,user.password):

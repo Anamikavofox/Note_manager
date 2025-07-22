@@ -6,7 +6,9 @@ from typing import List,Optional
 from app.database import SessionLocal
 from app.schemas import Note, NoteOut
 from app.routers.user import get_current_user
-
+# import logger
+from app.logger import setup_logging, logger
+setup_logging()
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
@@ -20,11 +22,13 @@ def get_db():
 
 @router.post("/notes/",response_model=NoteOut,status_code=201)
 def create_note(note:Note,db:Session=Depends(get_db), user=Depends(get_current_user)):
+    logger.info("Create notes API called!")
     sql = text("""
         insert into notes (title, content, user_id)
         values (:title, :content, :user_id)
         returning *
                """)
+    logger.info(f"sample logger {sql}")
     result = db.execute(sql, {"title": note.title, "content": note.content, "user_id": user.id})
     db.commit()
     row=result.fetchone()
@@ -33,14 +37,18 @@ def create_note(note:Note,db:Session=Depends(get_db), user=Depends(get_current_u
 
 @router.get("/notes/",response_model=list[NoteOut])
 def get_notes(db: Session = Depends(get_db),user=Depends(get_current_user)):
+    logger.info("Get note API called")
     sql=text("select * from notes where user_id=:user_id")
+    logger.info(f"sample logger{sql}")
     rows=db.execute(sql,{"user_id":user.id}).fetchall()
     return [NoteOut(**dict(row._mapping)) for row in rows]
     
 
 @router.get("/notes/{note_id}",response_model=NoteOut)
 def get_note(note_id:int,db: Session = Depends(get_db),user=Depends(get_current_user)):
+    logger.info("Get notes by id called")
     sql=text("select * from notes where id=:id and user_id=:user_id")
+    logger.info(f"sample logger{sql}")
     row=db.execute(sql,{"id":note_id,"user_id":user.id}).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Note not found")
@@ -64,7 +72,7 @@ async def update_note(updated_note:Note,
                    (:id is null or id=:id) and 
                    (:title is null or title=:title) 
                    LIMIT 1""")
-
+    logger.info(f"sample logger{exists_sql}")
     if not db.execute(exists_sql,{"title":title,"user_id":user.id,"id":note_id}).fetchone():
         raise HTTPException(status_code=404, detail="Note not found")
     
@@ -74,6 +82,7 @@ async def update_note(updated_note:Note,
                     AND (:id is NULL or id = :id)
                     AND (:title is NULL or title = :title)
                     returning * """)
+    logger.info(f"sample logger{update_sql}")
     rows=db.execute(update_sql,{"new_title": updated_note.title,
                                 "new_content": updated_note.content,
                                 "id": note_id,
