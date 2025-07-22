@@ -7,6 +7,8 @@ requires-python = ">=3.12"
 dependencies = [
     "celery[redis,timezone]>=5.5.3",
     "fastapi>=0.115.14",
+    "logger>=1.4",
+    "logging>=0.4.9.6",
     "passlib[bcrypt]>=1.7.4",
     "psycopg2-binary>=2.9.10",
     "pyjwt==2.8.0",
