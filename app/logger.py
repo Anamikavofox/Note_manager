@@ -1,25 +1,13 @@
-# import logging 
-# logger=logging.getLogger("note_manager")
-# logger.setLevel(logging.DEBUG)
-# console_handler=logging.StreamHandler()
-# console_handler.setLevel(logging.DEBUG)
-
-# file_handler=logging.FileHandler("app.log")
-# file_handler.setLevel(logging.INFO)
-# formatter=logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-# console_handler.setFormatter(formatter)
-# file_handler.setFormatter(formatter)
-
-# logger.addHandler(console_handler)
-# logger.addHandler(file_handler)
-
 import logging
 import logging.config
+import os 
+
+log_dir="logs"
+os.makedirs(log_dir,exist_ok=True)
 
 logging_config={
     "version":1,
-    "disable_existing_loggers": False,
+    "disable_existing_loggers": True,
     "formatters": {
         "detailed": {
             "format": "[%(asctime)s] %(levelname)s in %(module)s: %(message)s"
@@ -40,13 +28,20 @@ logging_config={
             "formatter": "detailed",
             "level": "ERROR",
             "stream": "ext://sys.stderr",
-            },},
+            },
+        "file":{
+            "class":"logging.FileHandler",
+            "formatter":"detailed",
+            "level":"INFO",
+            "filename":os.path.join(log_dir,"app.log"),
+            "mode":"a",
+        },},
     "root":{
-        "handlers": ["stdout", "stderr"],
+        "handlers": ["stdout", "stderr","file"],
         "level": "DEBUG",},
     "loggers":{
         "app":{
-            "handlers": ["stdout", "stderr"],
+            "handlers": ["stdout", "stderr","file"],
             "level": "INFO",
             "propagate": False,
     },
